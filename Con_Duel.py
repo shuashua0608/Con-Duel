@@ -11,7 +11,6 @@ class Con_Duel:
         self.dim = dim
         self.length = conf["length"]
         self.lamb = conf["lamb"]
-        self.eta = conf["eta"]
         self.alpha = alpha
         self.arm_norm_ub = conf["arm_norm_ub"]
         self.param_norm_ub = conf["param_norm_ub"]
@@ -58,10 +57,7 @@ class Con_Duel:
         self.y.append(yt)
         self.X.append(diff.reshape(self.dim))
         self.Minv = self.update_Minv(self.Minv, diff)
-
-        #self.theta += self.eta / np.sqrt(self.ctr+1) * (yt - prob) * diff
-        if self.ctr % 10 == 0 or len(self.regrets) < 200:
-           self.theta = solve_MLE(self.X, self.y, 1 / self.lamb)
+        self.theta = solve_MLE(self.X, self.y, 1 / self.lamb)
         self.ctr += 1
 
     def choose_arm_pair(self, arm_pool):
@@ -81,7 +77,7 @@ class Con_Duel:
             arm_2 = C_t[random.randint(0, len(C_t) - 1)]
             arm_diff = arm_1 - arm_2
 
-        if self.arm_strategy == "maxinp":
+        if self.arm_strategy == "con_duel":
             ucb_record = []
             arm_record = []
             for arm in C_t:
@@ -90,12 +86,6 @@ class Con_Duel:
                 ucb_record.append(max(C_temp))
             arm_1 = C_t[np.argmax(ucb_record)]
             arm_2 = arm_record[np.argmax(ucb_record)]
-            arm_diff = arm_1 - arm_2
-
-        if self.arm_strategy == "con_duel":
-            arm_1 = C_t[random.randint(0, len(C_t) - 1)]
-            uncertainty = [weighted_norm(arm - arm_1, self.Minv) for arm in C_t]
-            arm_2 = C_t[np.argmax(uncertainty)]
             arm_diff = arm_1 - arm_2
 
         end = time.time()
@@ -160,10 +150,7 @@ def run_user(user, arms, suparms, B, algo_names, algo_conf, alpha, algo_noconf,
     algos_con = {
         "ConDuel-random": Con_Duel(dim, algo_conf, alpha, "con_duel", "random", user),
         "ConDuel-maxinp": Con_Duel(dim, algo_conf, alpha, "con_duel", "maxinp", user),
-        "ConDuel-bs": Con_Duel(dim, algo_conf, alpha, "con_duel", "barycentric spanner", user),
-        "ConDuel-random-m": Con_Duel(dim, algo_conf,alpha, "maxinp", "random", user),
-        "ConDuel-maxinp-m": Con_Duel(dim, algo_conf, alpha, "maxinp", "maxinp", user),
-        "ConDuel-bs-m": Con_Duel(dim, algo_conf, alpha, "maxinp", "barycentric spanner", user)
+        "ConDuel-bs": Con_Duel(dim, algo_conf, alpha, "con_duel", "barycentric spanner", user)
     }
 
     algos_rconucb = {
@@ -240,39 +227,3 @@ def run_user(user, arms, suparms, B, algo_names, algo_conf, alpha, algo_noconf,
 
     return sum_user
 
-
-if __name__ =="__main__":
-
-    pth = "/data/ysh/project_uai/data/movielens"
-    arms = np.load(os.path.join(pth, "arms.npy"))
-    suparms = np.load(os.path.join(pth, "suparms.npy"))
-    B = np.load(os.path.join(pth, "barycentric.npy"))
-    dim = arms.shape[1]
-    pool_index_list = np.load('/data/ysh/project_k/syn_poolsize_50.npy')
-    horizon = 5000
-
-    conf = {"lamb": 5, "sigma": 0.05, "arm_norm_ub": 1, "param_norm_ub": 2, "length": 20,
-            "bt": lambda t: int(t / 50), "alpha": 1, "eta": 0.1}
-    noconf = {"lamb": 5, "sigma": 0.05, "arm_norm_ub": 1, "param_norm_ub": 2, "length": 20,
-              "alpha": 5, "eta": 0.1}
-    rconucb_conf = {"lamb": 0.5, "tilde_lamb": 1, "sigma": 0.05, "alpha": 0.25,
-                  "bt": lambda t: int(t / 50), "tilde_alpha": 0.25}
-
-    algo_names = ["ConDuel-random", "ConDuel-maxinp", "ConDuel-bs", "MaxInp", "Random_opt","Rconucb-PosNeg","Rconucb-Diff"]
-
-    users = np.load(os.path.join(pth, "users.npy"))
-    user = users[0]
-    alpha = 1.5
-    start = time.time()
-    sum_user = run_user(user, arms, suparms, B, algo_names, conf, alpha, noconf,
-                        rconucb_conf, pool_index_list, horizon)
-
-    end = time.time()
-    print("time:", end - start)
-    regret = sum_user["algos_regret"]
-    time = sum_user["algos_time"]
-    for algoname in algo_names:
-        print(algoname)
-        print(max(regret[algoname]))
-        print(time[algoname])
-    #np.save("/data/ysh/thesis_conduel1", sum_user)
