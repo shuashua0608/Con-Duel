@@ -204,17 +204,12 @@ def run_user(user, arms, suparms, B, algo_names, algo_conf, algo_noconf,  rconuc
             start = time.time()
             algo.init(arms)
             for i in range(horizon):
-                conv_time = np.random.binomial(1, p)
-                if conv_time ==  1:
-                    suparm_diff = algo.choose_suparm_pair(suparms, B)
-                    algo.update_parameters(suparm_diff)
-                """
                 if buget_func(i + 1) - buget_func(i) > 0:
                     conv_times = int(buget_func(i + 1) - buget_func(i))
                     for j in range(conv_times):
                         suparm_diff = algo.choose_suparm_pair(suparms, B)
                         algo.update_parameters(suparm_diff)
-                """
+            
                 arm_pool = arms[pool_index_list[i]]
                 a1, a2, arm_diff = algo.choose_arm_pair(arm_pool)
                 algo.update_parameters(arm_diff)
@@ -230,13 +225,14 @@ def run_user(user, arms, suparms, B, algo_names, algo_conf, algo_noconf,  rconuc
             start = time.time()
             for i in range(horizon):
                 arm_pool = arms[pool_index_list[i]]
-                conv_time = np.random.binomial(1, p)
-                if conv_time == 1:
-                    picked_x, duel_x = algo.choose_suparm_pair(suparms, arm_pool)
-                    if np.dot(picked_x - duel_x, user) > 0:
-                        algo.update_suparm_pair(picked_x, duel_x)
-                    else:
-                        algo.update_suparm_pair(duel_x, picked_x)
+                if buget_func(i + 1) - buget_func(i) > 0:
+                    conv_times = int(buget_func(i + 1) - buget_func(i))
+                    for j in range(conv_times):
+                        picked_x, duel_x = algo.choose_suparm_pair(suparms, arm_pool)
+                        if np.dot(picked_x - duel_x, user) > 0:
+                            algo.update_suparm_pair(picked_x, duel_x)
+                        else:
+                            algo.update_suparm_pair(duel_x, picked_x)
                 a = algo.choose_arm(arm_pool)
                 algo.update_parameters(a)
             end = time.time()
@@ -248,41 +244,3 @@ def run_user(user, arms, suparms, B, algo_names, algo_conf, algo_noconf,  rconuc
 
     return sum_user
 
-
-if __name__ =="__main__":
-
-    pth = os.getcwd()
-    pool_index_list = np.load(os.path.join(pth, 'data/syn_poolsize_50.npy'))
-
-    pth_data = os.path.join(pth, "data/movielens")
-    arms = np.load(os.path.join(pth_data, "arms.npy"))
-    suparms = np.load(os.path.join(pth_data, "suparms.npy"))
-    B = np.load(os.path.join(pth_data, "barycentric.npy"))
-    users = np.load(os.path.join(pth_data, "users.npy"))
-    dim = arms.shape[1]
-    horizon = 5000
-
-    conf = {"lamb": 5, "sigma": 0.05, "arm_norm_ub": 1, "param_norm_ub": 2, "length": 50,
-            "bt": lambda t: int(t / 50), "alpha": 1.5, "eta": 0.1}
-    noconf = {"lamb": 5, "sigma": 0.05, "arm_norm_ub": 1, "param_norm_ub": 2, "length": 50,
-              "alpha": 3.5, "eta": 0.1}
-    rconucb_conf = {"lamb": 0.5, "tilde_lamb": 1, "sigma": 0.05, "alpha": 0.25,
-                  "bt": lambda t: int(t / 50), "tilde_alpha": 0.25}
-    algo_names = ["ConDuel-random", "ConDuel-MaxInp", "ConDuel", "MaxInp", "Random_opt", "Rconucb-PosNeg", "Rconucb-Diff"]
-
-    param_strategy = "normal"
-    #param_strategy = "quick"
-    user = users[0]
-    start = time.time()
-    sum_user = run_user(user, arms, suparms, B, algo_names, conf, noconf,param_strategy,
-                        rconucb_conf, pool_index_list, horizon)
-    end = time.time()
-    print("time for one user:", end - start)
-
-    regret = sum_user["algos_regret"]
-    time = sum_user["algos_time"]
-    for algoname in algo_names:
-        print(algoname)
-        print(max(regret[algoname]))
-        print(time[algoname])
- 
