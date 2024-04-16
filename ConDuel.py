@@ -1,22 +1,21 @@
 import numpy as np
 import math
-from basic_func import *
+from utils import *
 import time, os
 from multiprocessing import Pool
-from RConUCB import R_ConUCB
 class Con_Duel: #param_strategy
-    def __init__(self, dim, conf, arm_strategy, suparm_strategy, param_strategy,theta_star):
+    def __init__(self, dim, conf, alpha, arm_strategy, suparm_strategy,theta_star):
 
         self.dim = dim
         self.length = conf["length"]
         self.lamb = conf["lamb"]
-        self.eta = conf["eta"]
-        self.alpha = conf["alpha"]
+        self.eta = conf['eta']
         self.arm_norm_ub = conf["arm_norm_ub"]
         self.param_norm_ub = conf["param_norm_ub"]
+        self.alpha = alpha
+        #self.param_strategy = conf["param_strategy"]
         self.arm_strategy = arm_strategy
         self.suparm_strategy = suparm_strategy
-        self.param_strategy = param_strategy
         self.theta_star = theta_star
 
         self.kappa = get_kappa(self.arm_norm_ub, self.param_norm_ub)
@@ -27,6 +26,8 @@ class Con_Duel: #param_strategy
         self.y = []
         self.rewards = []
         self.regrets = []
+        self.regrets_s = []
+        self.regrets_w = []
         self.ctr = 0
         self.t_arm = 0
         self.t_suparm = 0
@@ -35,12 +36,17 @@ class Con_Duel: #param_strategy
         for i in range(self.length):
             row = np.arange(arms.shape[0])
             np.random.shuffle(row)
+            arm_set = arms[row[0:2]]
             a1 = arms[row[0]]
             a2 = arms[row[1]]
             d_i = a1 - a2
-            r_i = sigmoid(np.dot(d_i, self.theta_star))
-            self.X.append(d_i.reshape(self.dim))
-            self.y.append(np.random.binomial(1, r_i))
+            p = choice_output(arm_set, self.theta_star)
+            self.y.append(np.array(p,dtype=np.float32))
+            self.X.append(np.array(arm_set.reshape(((-1,)))))
+            # r_i = sigmoid(np.dot(d_i, self.theta_star))
+            # self.X.append(d_i.reshape(self.dim))
+            # self.y.append(np.random.binomial(1, r_i))
+            
             self.M = self.M + np.outer(d_i, d_i)
             self.Minv = self.update_Minv(self.Minv, d_i)
 
@@ -51,20 +57,27 @@ class Con_Duel: #param_strategy
         new_Minv = Minv - tmp_a / tmp_b
         return new_Minv
 
-    def update_parameters(self, diff):
+    def update_parameters(self, arm_set):
+        
+        a1 = arm_set[0]
+        a2 = arm_set[1]
+        pt = choice_output(arm_set, self.theta_star)
+        self.y.append(np.array(pt))
+        self.X.append(np.array(arm_set.reshape((-1,))))
+        # prob = sigmoid(np.dot(diff, self.theta_star))
+        # yt = np.random.binomial(1, prob)
+        # self.y.append(yt)
+        # self.X.append(diff.reshape(self.dim))
+        self.Minv = self.update_Minv(self.Minv, a1 - a2)
 
-        prob = sigmoid(np.dot(diff, self.theta_star))
-        yt = np.random.binomial(1, prob)
-        self.y.append(yt)
-        self.X.append(diff.reshape(self.dim))
-        self.Minv = self.update_Minv(self.Minv, diff)
+        # if self.param_strategy == "quick":
+        #     self.theta += self.eta/np.sqrt(self.ctr+1)*(yt - prob) * diff
 
-        if self.param_strategy == "quick":
-           self.theta += self.eta/np.sqrt(self.ctr+1)*(yt - prob) * diff
-
-        if self.param_strategy == "normal":
-           if self.ctr % 5 == 0 or len(self.regrets) <200:
-              self.theta = solve_MLE(self.X, self.y, 1/self.lamb)
+#         if self.param_strategy == "normal":
+        # if self.ctr % 100 == 0 or len(self.regrets) <100:
+        #     self.theta = solve_MLE(self.X, self.y, 1/self.lamb)
+        if self.ctr % 100 == 0 or len(self.regrets) <100:
+            self.theta = calculate_theta_duel(self.X, self.y, TRAIN_CONFIG = TRAIN_CONFIG2)
         """
         #self.theta += self.eta / np.sqrt(self.ctr+1) * (yt - prob) * diff
         if self.ctr % 10 == 0 or len(self.regrets) < 200:
@@ -111,13 +124,21 @@ class Con_Duel: #param_strategy
         return arm_1, arm_2, arm_diff
 
     def update_reward(self, arm_1, arm_2, arm_pool):
-
-        reward1 = sigmoid(np.dot(arm_1, self.theta_star))
-        reward2 = sigmoid(np.dot(arm_2, self.theta_star))
-        #reward = 0.5 * np.dot(arm_1 + arm_2, self.theta_star)
+        reward1 = (np.dot(arm_1, self.theta_star))
+        reward2 = (np.dot(arm_2, self.theta_star))
         reward = 0.5*(reward1 + reward2)
+        max_reward = max(reward1, reward2)
+        min_reward = min(reward1, reward2)
+        
         self.rewards.append(reward)
-        self.regrets.append(sigmoid(np.max(arm_pool @ self.theta_star))- reward)
+        self.regrets.append((np.max(arm_pool @ self.theta_star))- reward)
+        self.regrets_s.append((np.max(arm_pool @ self.theta_star))- min_reward)
+        self.regrets_w.append((np.max(arm_pool @ self.theta_star))- max_reward)    
+        # reward1 = sigmoid(np.dot(arm_1, self.theta_star))
+        # reward2 = sigmoid(np.dot(arm_2, self.theta_star))
+        # reward = 0.5*(reward1 + reward2)
+        # self.rewards.append(reward)
+        # self.regrets.append(sigmoid(np.max(arm_pool @ self.theta_star))- reward)
 
     def choose_suparm_pair(self, suparms, B):
 
@@ -151,96 +172,4 @@ class Con_Duel: #param_strategy
 
         end = time.time()
         self.t_suparm += end - start
-        return suparm_diff
-
-
-def run_user(user, arms, suparms, B, algo_names, algo_conf, algo_noconf,  rconucb_conf,
-             param_strategy, pool_index_list, horizon, p):
-
-    dim = len(user)
-    algos_nocon = {
-        "MaxInp": Con_Duel(dim, algo_noconf,"maxinp","random",param_strategy,user),
-        "Random_opt": Con_Duel(dim, algo_noconf,"random_optimal", "random", param_strategy, user)
-    }
-
-    algos_con = {
-        "ConDuel-random": Con_Duel(dim, algo_conf, "con_duel", "random", param_strategy,user),
-        "ConDuel-Maxinp": Con_Duel(dim, algo_conf, "con_duel", "maxinp",param_strategy,user),
-        "ConDuel": Con_Duel(dim, algo_conf,"con_duel", "barycentric spanner",param_strategy, user)
-    }
-
-    algos_rconucb = {
-        "Rconucb-PosNeg": R_ConUCB(dim, rconucb_conf, "pos&neg", user),
-        "Rconucb-Diff": R_ConUCB(dim, rconucb_conf, "diff", user)
-    }
-    # run our conversational dueling bandit algorithms
-
-    algos_regret = {}
-    algos_time = {}
-    for algoname in algo_names:
-        # initialize
-        algos_regret[algoname] = []
-        algos_time[algoname] = []
-
-    for algoname, algo in algos_nocon.items():
-        if algoname in algo_names:
-            algo.init(arms)
-            start = time.time()
-            for i in range(horizon):
-                arm_pool = arms[pool_index_list[i]]
-                a1, a2, arm_diff = algo.choose_arm_pair(arm_pool)
-                algo.update_parameters(arm_diff)
-                algo.update_reward(a1, a2, arm_pool)
-            end = time.time()
-            regret_tmp = algo.regrets
-            cum_regret = [sum(regret_tmp[0:i]) for i in range(len(regret_tmp))]
-            algos_regret[algoname] = cum_regret
-            algos_time[algoname] = end - start
-
-    #buget_func = algo_conf["bt"]
-    # run our conversational dueling bandit algorithms
-    for algoname, algo in algos_con.items():
-        if algoname in algo_names:
-            start = time.time()
-            algo.init(arms)
-            for i in range(horizon):
-                if buget_func(i + 1) - buget_func(i) > 0:
-                    conv_times = int(buget_func(i + 1) - buget_func(i))
-                    for j in range(conv_times):
-                        suparm_diff = algo.choose_suparm_pair(suparms, B)
-                        algo.update_parameters(suparm_diff)
-            
-                arm_pool = arms[pool_index_list[i]]
-                a1, a2, arm_diff = algo.choose_arm_pair(arm_pool)
-                algo.update_parameters(arm_diff)
-                algo.update_reward(a1, a2, arm_pool)
-            end = time.time()
-            regret_tmp = algo.regrets
-            cum_regret = [sum(regret_tmp[0:i]) for i in range(len(regret_tmp))]
-            algos_regret[algoname] = cum_regret
-            algos_time[algoname] = end - start
-
-    for algoname, algo in algos_rconucb.items():
-        if algoname in algo_names:
-            start = time.time()
-            for i in range(horizon):
-                arm_pool = arms[pool_index_list[i]]
-                if buget_func(i + 1) - buget_func(i) > 0:
-                    conv_times = int(buget_func(i + 1) - buget_func(i))
-                    for j in range(conv_times):
-                        picked_x, duel_x = algo.choose_suparm_pair(suparms, arm_pool)
-                        if np.dot(picked_x - duel_x, user) > 0:
-                            algo.update_suparm_pair(picked_x, duel_x)
-                        else:
-                            algo.update_suparm_pair(duel_x, picked_x)
-                a = algo.choose_arm(arm_pool)
-                algo.update_parameters(a)
-            end = time.time()
-            regret_tmp = algo.regrets
-            cum_regret = [sum(regret_tmp[0:i]) for i in range(len(regret_tmp))]
-            algos_regret[algoname] = cum_regret
-            algos_time[algoname] = end - start
-    sum_user = {"algos_regret": algos_regret, "algos_time": algos_time}
-
-    return sum_user
-
+        return suparm_1, suparm_2, suparm_diff
